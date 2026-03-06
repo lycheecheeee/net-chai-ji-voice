@@ -1,0 +1,124 @@
+name: 24hr Cantonese Finance Radio
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+    - cron: '0 7,9,12,16,20,22 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      hour:
+        description: '指定播出時間 (0-23)'
+        required: false
+        default: ''
+      broadcast_type:
+        description: '節目類型'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - finance
+          - news
+          - music
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  generate-broadcast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          npm install -g pnpm
+          echo "Dependencies ready"
+
+      - name: Determine broadcast type
+        id: type
+        run: |
+          if [[ -n "${{ github.event.inputs.hour }}" ]]; then
+            HOUR="${{ github.event.inputs.hour }}"
+          else
+            HOUR=$(date -u +%H)
+          fi
+          DOW=$(date -u +%u)
+          
+          if [[ "${{ github.event.inputs.broadcast_type }}" == "finance" ]]; then
+            TYPE="finance"
+          elif [[ "${{ github.event.inputs.broadcast_type }}" == "news" ]]; then
+            TYPE="general"
+          elif [[ "${{ github.event.inputs.broadcast_type }}" == "music" ]]; then
+            TYPE="music"
+          elif [[ "$DOW" -le 5 ]]; then
+            case $HOUR in
+              07|09|12|16|20|22) TYPE="finance" ;;
+              00|01|02|03|04|05) TYPE="overnight" ;;
+              *) TYPE="general" ;;
+            esac
+          else
+            case $HOUR in
+              07|09|12|16|20|22) TYPE="finance" ;;
+              00|01|02|03|04|05) TYPE="overnight" ;;
+              *) TYPE="music" ;;
+            esac
+          fi
+          
+          echo "hour=$HOUR" >> $GITHUB_OUTPUT
+          echo "type=$TYPE" >> $GITHUB_OUTPUT
+
+      - name: Fetch finance data
+        if: steps.type.outputs.type == 'finance'
+        id: finance
+        run: |
+          HSI_DATA=$(curl -s "https://query1.finance.yahoo.com/v8/finance/chart/%5EHSI?interval=1d&range=1d" 2>/dev/null || echo '{}')
+          HSI=$(echo "$HSI_DATA" | node -e "const d=require('fs').readFileSync(0,'utf-8');try{const j=JSON.parse(d);console.log(j.chart?.result?.[0]?.meta?.regularMarketPrice||'N/A')}catch(e){console.log('N/A')}" 2>/dev/null || echo 'N/A')
+          echo "hsi=$HSI" >> $GITHUB_OUTPUT
+
+      - name: Call Vercel Radio API
+        id: radio
+        env:
+          VERCEL_API_URL: ${{ secrets.VERCEL_API_URL }}
+        run: |
+          HOUR=${{ steps.type.outputs.hour }}
+          TYPE=${{ steps.type.outputs.type }}
+          HSI=${{ steps.finance.outputs.hsi }}
+          
+          case $TYPE in
+            finance) TITLE="恆生指數最新走勢"; DESC="港股${HSI}點" ;;
+            overnight) TITLE="深夜音樂時段"; DESC="凌晨${HOUR}點" ;;
+            music) TITLE="音樂連播"; DESC="輕鬆時刻" ;;
+            *) TITLE="整點新聞快報"; DESC="為你報道最新資訊" ;;
+          esac
+          
+          RESPONSE=$(curl -s -X POST "${VERCEL_API_URL}/api/radio" \
+            -H "Content-Type: application/json" \
+            -d "{\"newsTitle\":\"$TITLE\",\"newsDescription\":\"$DESC\",\"broadcastType\":\"$TYPE\",\"hour\":$HOUR,\"financeData\":{\"hsi\":\"$HSI\"},\"voice\":\"tongtong\"}")
+          
+          SUCCESS=$(echo $RESPONSE | node -e "const d=require('fs').readFileSync(0,'utf-8');try{console.log(JSON.parse(d).success||false)}catch(e){console.log(false)}" 2>/dev/null || echo 'false')
+          echo "success=$SUCCESS" >> $GITHUB_OUTPUT
+          
+          if [[ "$SUCCESS" == "true" ]]; then
+            AUDIO=$(echo $RESPONSE | node -e "const d=require('fs').readFileSync(0,'utf-8');try{console.log(JSON.parse(d).audioBase64||'')}catch(e){console.log('')}" 2>/dev/null)
+            if [[ -n "$AUDIO" ]]; then
+              echo "$AUDIO" | base64 -d > "broadcast_${HOUR}.wav"
+              echo "🎵 音頻已生成"
+            fi
+          fi
+
+      - name: Upload broadcast audio
+        if: steps.radio.outputs.success == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: broadcast-${{ steps.type.outputs.hour }}
+          path: broadcast_*.wav
+          retention-days: 7
