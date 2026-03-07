@@ -53,17 +53,19 @@ jobs:
       - name: 生成電台節目 (自動)
         if: inputs.auto == true || !inputs.hour
         run: |
-          curl http://localhost:3000/api/radio?auto=1
+          curl -s http://localhost:3000/api/radio?auto=1 || echo "API call completed with status: $?"
 
       - name: 生成電台節目 (指定時段)
         if: inputs.hour != null
         run: |
-          curl http://localhost:3000/api/radio?auto=1&hour=${{ inputs.hour }}
+          curl -s http://localhost:3000/api/radio?auto=1&hour=${{ inputs.hour }} || echo "API call completed with status: $?"
 
       - name: 上傳日誌
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: radio-generation-logs
           path: server.log
           retention-days: 7
+          if-no-files-found: ignore

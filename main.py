@@ -10,6 +10,10 @@ import requests
 import feedparser
 from datetime import datetime
 from pathlib import Path
+from dotenv import load_dotenv
+
+# 載入 .env 文件（如存在）
+load_dotenv()
 
 # 配置
 BIGMODEL_API_KEY = os.getenv('BIGMODEL_API_KEY')
