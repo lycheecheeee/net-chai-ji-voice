@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import ZAI from 'z-ai-web-dev-sdk'
 
 // 可用的語音選項
 const AVAILABLE_VOICES = ['tongtong', 'chuichui', 'xiaochen', 'jam', 'kazi', 'douji', 'luodo'] as const
 type VoiceType = typeof AVAILABLE_VOICES[number]
+
+// ZAI SDK 配置 - 從環境變量讀取
+const getZAIConfig = () => ({
+  baseUrl: process.env.ZAI_BASE_URL || 'https://api.z.ai/v1',
+  apiKey: process.env.ZAI_API_KEY || '',
+})
 
 export async function POST(request: NextRequest) {
   try {
@@ -31,15 +36,25 @@ export async function POST(request: NextRequest) {
     // 驗證語音類型
     const validVoice: VoiceType = AVAILABLE_VOICES.includes(voice) ? voice : 'tongtong'
 
-    const zai = await ZAI.create()
+    const config = getZAIConfig()
 
-    const response = await zai.audio.tts.create({
-      input: text,
-      voice: validVoice,
-      speed: validSpeed,
-      response_format: 'wav',
-      stream: false
+    const response = await fetch(`${config.baseUrl}/audio/tts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify({
+        input: text,
+        voice: validVoice,
+        speed: validSpeed,
+        response_format: 'wav',
+      }),
     })
+
+    if (!response.ok) {
+      throw new Error(`TTS API error: ${response.status}`)
+    }
 
     // 獲取音頻數據
     const arrayBuffer = await response.arrayBuffer()
@@ -55,14 +70,14 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error('TTS Error:', error)
-    
+
     if (error instanceof Error) {
       return NextResponse.json(
         { error: `語音合成失敗: ${error.message}` },
         { status: 500 }
       )
     }
-    
+
     return NextResponse.json(
       { error: '語音合成失敗，請稍後再試' },
       { status: 500 }

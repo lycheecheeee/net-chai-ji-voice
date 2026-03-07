@@ -1,5 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server'
-import ZAI from 'z-ai-web-dev-sdk'
+
+// ZAI SDK 配置 - 從環境變量讀取
+const getZAIConfig = () => ({
+  baseUrl: process.env.ZAI_BASE_URL || 'https://api.z.ai/v1',
+  apiKey: process.env.ZAI_API_KEY || '',
+})
+
+// 簡化的 ZAI 客戶端 (直接使用 fetch)
+async function zaiChatCompletion(messages: Array<{ role: string; content: string }>, options: any = {}) {
+  const config = getZAIConfig()
+
+  const response = await fetch(`${config.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${config.apiKey}`,
+    },
+    body: JSON.stringify({
+      messages,
+      ...options,
+    }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`API error: ${response.status}`)
+  }
+
+  return response.json()
+}
 
 const SYSTEM_PROMPT = `你係「Net 仔」，一個體貼嘅財經 AI 助手。你嘅特點：
 
@@ -30,18 +58,15 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const zai = await ZAI.create()
-
-    const completion = await zai.chat.completions.create({
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: text }
-      ],
+    const completion = await zaiChatCompletion([
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: text }
+    ], {
       temperature: 0.7,
       max_tokens: 500,
     })
 
-    const content = completion.choices[0]?.message?.content || '抱歉，我暫時無法回應，請稍後再試。'
+    const content = completion.choices?.[0]?.message?.content || '抱歉，我暫時無法回應，請稍後再試。'
 
     // Detect emotion from response (simplified)
     let emotion = 'neutral'
