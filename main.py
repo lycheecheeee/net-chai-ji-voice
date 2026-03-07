@@ -220,7 +220,7 @@ def synthesize_voice_cantonese(text, output_file):
     clean_text = text.replace('\n', '，').strip()[:500]
 
     # Cantonese.ai 語音 ID
-    VOICE_ID = '2725cf0f-efe2-4132-9e06-62ad84b2973d'
+    VOICE_ID = '91b6d38b-d4e9-42ce-bf3c-9793741c0d18'
 
     try:
         response = requests.post(
