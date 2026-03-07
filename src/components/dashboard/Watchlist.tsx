@@ -20,7 +20,20 @@ export default function Watchlist() {
       try {
         const response = await fetch('/api/market')
         const result = await response.json()
-        setStocks(result.topStocks)
+        // 處理 market API 數據，生成觀察名單
+        if (result.topStocks) {
+          setStocks(result.topStocks)
+        } else if (result.hsi) {
+          // 從 market 數據構建股票列表
+          const stockList: Stock[] = [
+            { code: 'HSI', name: '恆生指數', price: result.hsi.value, change: result.hsi.change },
+            { code: 'HSCEI', name: '國企指數', price: result.hscei?.value || 0, change: result.hscei?.change || 0 },
+            { code: 'GOLD', name: '黃金', price: result.gold?.price || 0, change: result.gold?.change || 0 },
+            { code: 'OIL', name: '原油', price: result.oil?.price || 0, change: result.oil?.change || 0 },
+            { code: 'BTC', name: '比特幣', price: result.bitcoin?.price || 0, change: result.bitcoin?.change || 0 },
+          ]
+          setStocks(stockList)
+        }
       } catch (error) {
         console.error('Failed to fetch watchlist:', error)
       } finally {
