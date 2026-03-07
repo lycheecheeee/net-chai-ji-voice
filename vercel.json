@@ -1,13 +1,8 @@
 {
-  "functions": {
-    "src/app/api/radio/route.ts": {
-      "maxDuration": 60
-    },
-    "src/app/api/tts/route.ts": {
-      "maxDuration": 60
-    },
-    "src/app/api/chat/route.ts": {
-      "maxDuration": 30
+  "crons": [
+    {
+      "path": "/api/radio?auto=1",
+      "schedule": "0 * * * *"
     }
-  }
+  ]
 }

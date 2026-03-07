@@ -366,16 +366,66 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// GET 端點
-export async function GET() {
+// GET 端點 - 支持 cron 自動生成
+export async function GET(req: NextRequest) {
+  const { searchParams } = req.nextUrl
+  const auto = searchParams.get('auto')
+  const hourParam = searchParams.get('hour')
+
+  // 如果有 auto 參數，自動生成當前時段節目
+  if (auto === '1' || hourParam) {
+    const hour = hourParam ? parseInt(hourParam) : new Date().getHours()
+
+    if (hour < 0 || hour > 23) {
+      return NextResponse.json({ error: '無效的時間參數' }, { status: 400 })
+    }
+
+    const program = PROGRAM_SCHEDULE[hour] || { name: '音樂連播', type: 'weekend_music' as BroadcastType }
+
+    console.log(`📻 [CRON] 自動生成節目: ${program.name} (${hour}:00)`)
+
+    try {
+      // 生成腳本
+      const cantoneseScript = await generateCantoneseScript(
+        program.type, program.name, '今日財經', undefined, undefined, hour
+      )
+
+      // 合成語音
+      const audioBase64 = await synthesizeVoice(cantoneseScript, 'cantonese_female')
+
+      return NextResponse.json({
+        success: true,
+        hour,
+        programName: program.name,
+        broadcastType: program.type,
+        cantoneseScript,
+        audioSize: audioBase64 ? audioBase64.length : 0,
+        timestamp: new Date().toISOString()
+      })
+    } catch (error) {
+      return NextResponse.json({
+        success: false,
+        error: error instanceof Error ? error.message : '生成失敗',
+        hour,
+        programName: program.name
+      }, { status: 500 })
+    }
+  }
+
+  // 默認返回配置信息
   return NextResponse.json({
     schedule: PROGRAM_SCHEDULE,
     availableVoices: ['tongtong', 'chuichui', 'xiaochen', 'jam', 'kazi', 'douji', 'luodo', 'cantonese_female', 'cantonese_male'],
     description: '24小時廣東話財經電台 API',
-    providers: { llm: 'BigModel (GLM-4)', tts: 'z.ai / Cantonese.ai' },
+    providers: { llm: 'BigModel (GLM-4)', tts: 'Cantonese.ai' },
     configStatus: {
       bigModel: BIGMODEL_API_KEY ? 'configured' : 'not configured',
       cantonese: CANTONESE_API_KEY ? 'configured' : 'not configured',
+    },
+    usage: {
+      autoGenerate: 'GET /api/radio?auto=1 - 自動生成當前時段節目',
+     指定時段: 'GET /api/radio?auto=1&hour=9 - 生成指定時段節目',
+      manualGenerate: 'POST /api/radio with JSON body'
     }
   })
 }

@@ -1,0 +1,1 @@
+{"error":"z.ai API 未配置。請設置 ZAI_BASE_URL 和 ZAI_API_KEY 環境變量，或使用 Cantonese.ai API（設置 CANTONESE_API_KEY）"}
