@@ -1,16 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-// ZAI SDK 配置 - 從環境變量讀取
-const getZAIConfig = () => ({
-  baseUrl: process.env.ZAI_BASE_URL || 'https://api.z.ai/v1',
-  apiKey: process.env.ZAI_API_KEY || '',
-})
+// ASR (語音識別) 暫時不支援
+// 如需語音識別功能，請配置以下環境變量：
+// - GOOGLE_APPLICATION_CREDENTIALS (Google Cloud Speech-to-Text)
+// - AZURE_SPEECH_KEY (Azure Speech Services)
+// - OPENAI_API_KEY (OpenAI Whisper)
 
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
     const audioFile = formData.get('audio') as File
-    const language = formData.get('language') as string || 'yue' // 粵語
 
     if (!audioFile) {
       return NextResponse.json(
@@ -19,65 +18,28 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 驗證文件類型
-    const validTypes = ['audio/wav', 'audio/mp3', 'audio/mpeg', 'audio/webm', 'audio/ogg']
-    if (!validTypes.includes(audioFile.type) && !audioFile.name.match(/\.(wav|mp3|webm|ogg)$/i)) {
-      return NextResponse.json(
-        { error: '不支援的音頻格式，請使用 WAV、MP3、WebM 或 OGG' },
-        { status: 400 }
-      )
-    }
-
-    // 驗證文件大小 (最大 25MB)
-    if (audioFile.size > 25 * 1024 * 1024) {
-      return NextResponse.json(
-        { error: '音頻文件太大，最大支援 25MB' },
-        { status: 400 }
-      )
-    }
-
-    const config = getZAIConfig()
-
-    // 準備 FormData
-    const apiFormData = new FormData()
-    apiFormData.append('file', audioFile)
-    apiFormData.append('language', language)
-
-    const response = await fetch(`${config.baseUrl}/audio/asr`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${config.apiKey}`,
-      },
-      body: apiFormData,
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error('ASR API error:', errorText)
-      throw new Error(`ASR API error: ${response.status}`)
-    }
-
-    const result = await response.json()
-
+    // 目前不支援 ASR
     return NextResponse.json({
-      text: result.text || '',
-      confidence: result.confidence || 0.9,
-      duration: result.duration || 0,
+      error: '語音識別功能暫時不支援',
+      text: '',
+      suggestion: '請使用文字輸入',
     })
 
   } catch (error) {
     console.error('ASR Error:', error)
 
-    if (error instanceof Error) {
-      return NextResponse.json(
-        { error: `語音識別失敗: ${error.message}` },
-        { status: 500 }
-      )
-    }
-
     return NextResponse.json(
-      { error: '語音識別失敗，請稍後再試' },
+      { error: '語音識別失敗，請稍後再試', text: '' },
       { status: 500 }
     )
   }
+}
+
+// GET 端點：獲取 ASR 狀態
+export async function GET() {
+  return NextResponse.json({
+    available: false,
+    message: '語音識別功能暫時不支援，請使用文字輸入',
+    supportedFormats: ['wav', 'mp3', 'webm', 'ogg'],
+  })
 }

@@ -1,33 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-// ZAI SDK 配置 - 從環境變量讀取
-const getZAIConfig = () => ({
-  baseUrl: process.env.ZAI_BASE_URL || 'https://api.z.ai/v1',
-  apiKey: process.env.ZAI_API_KEY || '',
-})
-
-// 簡化的 ZAI 客戶端 (直接使用 fetch)
-async function zaiChatCompletion(messages: Array<{ role: string; content: string }>, options: any = {}) {
-  const config = getZAIConfig()
-
-  const response = await fetch(`${config.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${config.apiKey}`,
-    },
-    body: JSON.stringify({
-      messages,
-      ...options,
-    }),
-  })
-
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status}`)
-  }
-
-  return response.json()
-}
+// BigModel API 配置
+const BIGMODEL_API_KEY = process.env.BIGMODEL_API_KEY || ''
+const BIGMODEL_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4'
 
 const SYSTEM_PROMPT = `你係「Net 仔」，一個體貼嘅財經 AI 助手。你嘅特點：
 
@@ -58,14 +33,37 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const completion = await zaiChatCompletion([
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: text }
-    ], {
-      temperature: 0.7,
-      max_tokens: 500,
+    if (!BIGMODEL_API_KEY) {
+      return NextResponse.json(
+        { error: 'API Key 未配置', content: '抱歉，服務暫時不可用。' },
+        { status: 500 }
+      )
+    }
+
+    const response = await fetch(`${BIGMODEL_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${BIGMODEL_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'glm-4',
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: text }
+        ],
+        temperature: 0.7,
+        max_tokens: 500,
+      }),
     })
 
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('BigModel API error:', errorText)
+      throw new Error(`API error: ${response.status}`)
+    }
+
+    const completion = await response.json()
     const content = completion.choices?.[0]?.message?.content || '抱歉，我暫時無法回應，請稍後再試。'
 
     // Detect emotion from response (simplified)
