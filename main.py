@@ -215,50 +215,42 @@ def get_default_script(program_type, hour):
 
 def synthesize_voice_cantonese(text, output_file):
     """使用 Cantonese API 合成語音"""
-    
+
     # 清理文本
-    clean_text = text.replace('\n', '，').strip()[:300]
-    
+    clean_text = text.replace('\n', '，').strip()[:500]
+
+    # Cantonese.ai 語音 ID
+    VOICE_ID = '2725cf0f-efe2-4132-9e06-62ad84b2973d'
+
     try:
         response = requests.post(
-            'https://www.cantonese.ai/api/tts',
+            'https://cantonese.ai/api/tts',
             headers={
-                'Authorization': f'Bearer {CANTONESE_API_KEY}',
                 'Content-Type': 'application/json'
             },
             json={
+                'api_key': CANTONESE_API_KEY,
                 'text': clean_text,
-                'voice': 'cantonese_female',
-                'speed': 0.95
+                'frame_rate': '24000',
+                'speed': 1.0,
+                'pitch': 0,
+                'language': 'cantonese',
+                'output_extension': 'wav',
+                'voice_id': VOICE_ID,
+                'should_return_timestamp': False
             },
             timeout=60
         )
-        
+
         if response.ok:
-            data = response.json()
-            
-            # 檢查返回格式
-            if 'audio_url' in data:
-                # 下載音頻
-                audio_response = requests.get(data['audio_url'], timeout=30)
-                with open(output_file, 'wb') as f:
-                    f.write(audio_response.content)
-                return True
-            
-            elif 'audio_base64' in data or 'audioBase64' in data:
-                import base64
-                audio_data = data.get('audio_base64') or data.get('audioBase64')
-                with open(output_file, 'wb') as f:
-                    f.write(base64.b64decode(audio_data))
-                return True
-            
-            else:
-                print(f"Cantonese API 回應格式錯誤: {data}")
-                return False
+            # Cantonese.ai 直接返回音頻數據
+            with open(output_file, 'wb') as f:
+                f.write(response.content)
+            return True
         else:
             print(f"Cantonese API 錯誤: {response.status_code} - {response.text}")
             return False
-            
+
     except Exception as e:
         print(f"語音合成失敗: {e}")
         return False
