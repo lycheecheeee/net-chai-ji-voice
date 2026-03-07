@@ -69,6 +69,9 @@ interface RadioResponse {
   audioBase64?: string
   programName?: string
   error?: string
+  timestamps?: Array<{ start: number; end: number; text: string }>
+  srtTimestamp?: string
+  duration?: number
 }
 
 // 節目編排表
@@ -234,17 +237,47 @@ ${description ? `內容：${description}` : ''}
   }
 }
 
-// 語音合成 - 支持 Cantonese.ai 和本地 TTS API
-async function synthesizeVoice(text: string, voice: string = 'tongtong'): Promise<string | null> {
-  // 清理文本
-  const cleanText = text.replace(/\n/g, '，').trim().slice(0, 500)
+// 語音合成選項
+interface SynthesizeOptions {
+  voice?: string
+  speed?: number
+  pitch?: number
+  enhance?: boolean
+  turbo?: boolean
+  getTimestamps?: boolean
+}
+
+// 語音合成結果
+interface SynthesizeResult {
+  audioBase64: string
+  timestamps?: Array<{ start: number; end: number; text: string }>
+  srtTimestamp?: string
+  duration?: number
+}
+
+// 語音合成 - 支持 Cantonese.ai 完整功能
+async function synthesizeVoice(
+  text: string,
+  options: SynthesizeOptions = {}
+): Promise<SynthesizeResult | null> {
+  const {
+    voice = 'cantonese_female',
+    speed = 1.0,
+    pitch = 0,
+    enhance = true,
+    turbo = true,
+    getTimestamps = false
+  } = options
+
+  // 清理文本（支持最多 5000 字符）
+  const cleanText = text.replace(/\n/g, '，').trim().slice(0, 5000)
 
   // 優先使用 Cantonese.ai（如果已配置）
   if (CANTONESE_API_KEY) {
     try {
-      console.log('🎵 使用 Cantonese.ai 進行語音合成...')
+      console.log('🎵 使用 Cantonese.ai 進行語音合成...', { speed, pitch, enhance, turbo })
 
-      const voiceId = CANTONESE_VOICE_IDS[voice as keyof typeof CANTONESE_VOICE_IDS] 
+      const voiceId = CANTONESE_VOICE_IDS[voice as keyof typeof CANTONESE_VOICE_IDS]
         || CANTONESE_VOICE_IDS.cantonese_female
 
       const response = await fetch(CANTONESE_API_URL, {
@@ -256,21 +289,40 @@ async function synthesizeVoice(text: string, voice: string = 'tongtong'): Promis
           api_key: CANTONESE_API_KEY,
           text: cleanText,
           frame_rate: '24000',
-          speed: 1.0,
-          pitch: 0,
+          speed: speed,
+          pitch: pitch,
           language: 'cantonese',
           output_extension: 'wav',
           voice_id: voiceId,
-          should_return_timestamp: false
+          should_enhance: enhance,                        // 音頻增強
+          should_use_turbo_model: turbo,                  // 快速模式
+          should_return_timestamp: getTimestamps,         // 時間戳
+          should_convert_from_simplified_to_traditional: true,
         }),
       })
 
       if (response.ok) {
-        // Cantonese.ai 直接返回音頻數據
-        const arrayBuffer = await response.arrayBuffer()
-        const buffer = Buffer.from(new Uint8Array(arrayBuffer))
-        console.log(`✅ Cantonese.ai 成功: ${buffer.length} bytes`)
-        return buffer.toString('base64')
+        if (getTimestamps) {
+          // 返回 JSON 格式（包含時間戳）
+          const result = await response.json()
+          console.log(`✅ Cantonese.ai 成功 (帶時間戳): ${result.file.length} bytes`)
+
+          return {
+            audioBase64: result.file,
+            timestamps: result.timestamps,
+            srtTimestamp: result.srt_timestamp,
+            duration: result.timestamps?.[result.timestamps.length - 1]?.end || 0
+          }
+        } else {
+          // 直接返回音頻數據
+          const arrayBuffer = await response.arrayBuffer()
+          const buffer = Buffer.from(new Uint8Array(arrayBuffer))
+          console.log(`✅ Cantonese.ai 成功: ${buffer.length} bytes`)
+
+          return {
+            audioBase64: buffer.toString('base64')
+          }
+        }
       }
     } catch (error) {
       console.error('❌ Cantonese.ai 失敗:', error)
@@ -281,9 +333,8 @@ async function synthesizeVoice(text: string, voice: string = 'tongtong'): Promis
   console.log('🎵 使用本地 TTS API 進行語音合成...')
 
   try {
-    // 在服務器端，使用 localhost
-    const baseUrl = process.env.VERCEL_URL 
-      ? `https://${process.env.VERCEL_URL}` 
+    const baseUrl = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
       : 'http://localhost:3000'
 
     const response = await fetch(`${baseUrl}/api/tts`, {
@@ -294,7 +345,11 @@ async function synthesizeVoice(text: string, voice: string = 'tongtong'): Promis
       body: JSON.stringify({
         text: cleanText,
         voice: voice,
-        speed: 0.95,
+        speed: speed,
+        pitch: pitch,
+        enhance: enhance,
+        turbo: turbo,
+        timestamps: getTimestamps,
       }),
     })
 
@@ -302,10 +357,26 @@ async function synthesizeVoice(text: string, voice: string = 'tongtong'): Promis
       throw new Error(`TTS API error: ${response.status}`)
     }
 
-    // TTS API 直接返回音頻數據
-    const arrayBuffer = await response.arrayBuffer()
-    const buffer = Buffer.from(new Uint8Array(arrayBuffer))
-    return buffer.toString('base64')
+    // 檢查響應類型
+    const contentType = response.headers.get('content-type') || ''
+
+    if (contentType.includes('application/json')) {
+      // JSON 響應（帶時間戳）
+      const result = await response.json()
+      return {
+        audioBase64: result.audioBase64 || result.file,
+        timestamps: result.timestamps,
+        srtTimestamp: result.srtTimestamp,
+        duration: result.duration
+      }
+    } else {
+      // 直接音頻數據
+      const arrayBuffer = await response.arrayBuffer()
+      const buffer = Buffer.from(new Uint8Array(arrayBuffer))
+      return {
+        audioBase64: buffer.toString('base64')
+      }
+    }
   } catch (error) {
     console.error('❌ 本地 TTS API 失敗:', error)
     return null
@@ -336,10 +407,16 @@ export async function POST(req: NextRequest) {
 
     console.log(`📝 腳本已生成 (${cantoneseScript.length} 字)`)
 
-    // Step 2: 合成語音
-    const audioBase64 = await synthesizeVoice(cantoneseScript, voice)
+    // Step 2: 合成語音（使用增強和快速模式）
+    const audioResult = await synthesizeVoice(cantoneseScript, {
+      voice: voice,
+      speed: 1.0,
+      enhance: true,
+      turbo: true,
+      getTimestamps: false
+    })
 
-    if (!audioBase64) {
+    if (!audioResult) {
       return NextResponse.json({
         success: false,
         error: '語音合成失敗',
@@ -353,8 +430,9 @@ export async function POST(req: NextRequest) {
       success: true,
       broadcastType: finalType,
       cantoneseScript,
-      audioBase64,
+      audioBase64: audioResult.audioBase64,
       programName: program.name,
+      duration: audioResult.duration,
     } as RadioResponse)
 
   } catch (error) {
@@ -390,8 +468,13 @@ export async function GET(req: NextRequest) {
         program.type, program.name, '今日財經', undefined, undefined, hour
       )
 
-      // 合成語音
-      const audioBase64 = await synthesizeVoice(cantoneseScript, 'cantonese_female')
+      // 合成語音（使用增強和快速模式）
+      const audioResult = await synthesizeVoice(cantoneseScript, {
+        voice: 'cantonese_female',
+        speed: 1.0,
+        enhance: true,
+        turbo: true
+      })
 
       return NextResponse.json({
         success: true,
@@ -399,7 +482,8 @@ export async function GET(req: NextRequest) {
         programName: program.name,
         broadcastType: program.type,
         cantoneseScript,
-        audioSize: audioBase64 ? audioBase64.length : 0,
+        audioSize: audioResult?.audioBase64?.length || 0,
+        duration: audioResult?.duration,
         timestamp: new Date().toISOString()
       })
     } catch (error) {

@@ -15,15 +15,52 @@ const ZAI_USER_ID = process.env.ZAI_USER_ID || ''
 // Cantonese.ai 語音 ID
 const CANTONESE_VOICE_IDS = {
   cantonese_female: '2725cf0f-efe2-4132-9e06-62ad84b2973d',
-  cantonese_male: '2725cf0f-efe2-4132-9e06-62ad84b2973d', // 使用相同的，或者有另一個
+  cantonese_male: '2725cf0f-efe2-4132-9e06-62ad84b2973d',
 } as const
 
 const ZAI_VOICES = ['tongtong', 'chuichui', 'xiaochen', 'jam', 'kazi', 'douji', 'luodo'] as const
 
+// TTS 請求參數接口
+interface TTSRequest {
+  text: string
+  voice?: string
+  speed?: number
+  pitch?: number
+  format?: 'wav' | 'mp3'
+  enhance?: boolean
+  turbo?: boolean
+  timestamps?: boolean
+  duration?: number
+  language?: 'cantonese' | 'english' | 'mandarin'
+}
+
+// TTS 響應接口（帶時間戳）
+interface TTSResponseWithTimestamps {
+  file: string          // Base64 編碼的音頻
+  request_id: string
+  srt_timestamp: string // SRT 格式字幕
+  timestamps: Array<{
+    start: number
+    end: number
+    text: string
+  }>
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    const { text, voice = 'tongtong', speed = 1.0 } = body
+    const body: TTSRequest = await request.json()
+    const {
+      text,
+      voice = 'cantonese_female',
+      speed = 1.0,
+      pitch = 0,
+      format = 'wav',
+      enhance = true,      // 默認啟用音頻增強
+      turbo = true,        // 默認啟用快速模式
+      timestamps = false,  // 是否返回時間戳
+      duration,
+      language = 'cantonese'
+    } = body
 
     if (!text) {
       return NextResponse.json(
@@ -32,19 +69,33 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (text.length > 1024) {
+    // API 支持最大 5000 字符
+    if (text.length > 5000) {
       return NextResponse.json(
-        { error: '文字長度超過限制（最大 1024 字符）' },
+        { error: '文字長度超過限制（最大 5000 字符）' },
         { status: 400 }
       )
     }
 
-    const validSpeed = Math.max(0.5, Math.min(2.0, speed))
+    // 驗證參數範圍
+    const validSpeed = Math.max(0.5, Math.min(3.0, speed))
+    const validPitch = Math.max(-12, Math.min(12, pitch))
 
     // 優先使用 Cantonese.ai（如果有 API Key）
     if (CANTONESE_API_KEY) {
       try {
-        return await handleCantoneseTTS(text, voice, validSpeed)
+        return await handleCantoneseTTS({
+          text,
+          voice,
+          speed: validSpeed,
+          pitch: validPitch,
+          format,
+          enhance,
+          turbo,
+          timestamps,
+          duration,
+          language
+        })
       } catch (error) {
         console.error('Cantonese.ai 失敗:', error)
       }
@@ -79,51 +130,119 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Cantonese.ai TTS（正確格式）
-async function handleCantoneseTTS(text: string, voice: string, speed: number) {
-  console.log('🎵 使用 Cantonese.ai TTS:', text.slice(0, 50))
+// Cantonese.ai TTS（完整功能版本）
+async function handleCantoneseTTS(params: {
+  text: string
+  voice: string
+  speed: number
+  pitch: number
+  format: 'wav' | 'mp3'
+  enhance: boolean
+  turbo: boolean
+  timestamps: boolean
+  duration?: number
+  language: string
+}) {
+  const { text, voice, speed, pitch, format, enhance, turbo, timestamps, duration, language } = params
 
-  const voiceId = CANTONESE_VOICE_IDS[voice as keyof typeof CANTONESE_VOICE_IDS] 
+  console.log('🎵 使用 Cantonese.ai TTS:', {
+    text: text.slice(0, 50),
+    speed,
+    pitch,
+    format,
+    enhance,
+    turbo,
+    timestamps
+  })
+
+  const voiceId = CANTONESE_VOICE_IDS[voice as keyof typeof CANTONESE_VOICE_IDS]
     || CANTONESE_VOICE_IDS.cantonese_female
+
+  // 構建請求體
+  const requestBody: Record<string, unknown> = {
+    api_key: CANTONESE_API_KEY,
+    text: text,
+    frame_rate: '24000',
+    speed: speed,
+    pitch: pitch,
+    language: language,
+    output_extension: format,
+    voice_id: voiceId,
+    should_enhance: enhance,                              // 音頻增強
+    should_use_turbo_model: turbo,                        // 快速模式
+    should_return_timestamp: timestamps,                  // 返回時間戳
+    should_convert_from_simplified_to_traditional: true,  // 簡體轉繁體
+  }
+
+  // 可選：目標時長
+  if (duration) {
+    requestBody.duration = duration
+  }
 
   const response = await fetch(CANTONESE_API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      api_key: CANTONESE_API_KEY,
-      text: text,
-      frame_rate: '24000',
-      speed: speed,
-      pitch: 0,
-      language: 'cantonese',
-      output_extension: 'wav',
-      voice_id: voiceId,
-      should_return_timestamp: false
-    }),
+    body: JSON.stringify(requestBody),
   })
 
   if (!response.ok) {
     const errorText = await response.text()
     console.error('Cantonese.ai error:', errorText)
+
+    // 處理特定錯誤碼
+    if (response.status === 413) {
+      return NextResponse.json(
+        { error: '文字超過最大長度（5000字符）' },
+        { status: 413 }
+      )
+    }
+    if (response.status === 429) {
+      return NextResponse.json(
+        { error: '請求過於頻繁，請稍後再試' },
+        { status: 429 }
+      )
+    }
+
     throw new Error(`Cantonese.ai API error: ${response.status}`)
   }
 
-  // 直接返回音頻數據
-  const arrayBuffer = await response.arrayBuffer()
-  const buffer = Buffer.from(new Uint8Array(arrayBuffer))
+  // 根據是否請求時間戳，返回不同格式
+  if (timestamps) {
+    // 返回 JSON 格式（包含時間戳和 Base64 音頻）
+    const result: TTSResponseWithTimestamps = await response.json()
 
-  console.log(`✅ Cantonese.ai 成功: ${buffer.length} bytes`)
+    console.log(`✅ Cantonese.ai 成功 (帶時間戳): ${result.file.length} bytes`)
+    console.log(`📝 SRT 字幕: ${result.srt_timestamp.slice(0, 100)}...`)
 
-  return new NextResponse(buffer, {
-    status: 200,
-    headers: {
-      'Content-Type': 'audio/wav',
-      'Content-Length': buffer.length.toString(),
-      'Cache-Control': 'public, max-age=3600',
-    },
-  })
+    return NextResponse.json({
+      success: true,
+      audioBase64: result.file,
+      requestId: result.request_id,
+      srtTimestamp: result.srt_timestamp,
+      timestamps: result.timestamps,
+      format: format,
+      duration: result.timestamps?.[result.timestamps.length - 1]?.end || 0
+    })
+  } else {
+    // 直接返回音頻數據
+    const arrayBuffer = await response.arrayBuffer()
+    const buffer = Buffer.from(new Uint8Array(arrayBuffer))
+
+    console.log(`✅ Cantonese.ai 成功: ${buffer.length} bytes`)
+
+    const contentType = format === 'mp3' ? 'audio/mpeg' : 'audio/wav'
+
+    return new NextResponse(buffer, {
+      status: 200,
+      headers: {
+        'Content-Type': contentType,
+        'Content-Length': buffer.length.toString(),
+        'Cache-Control': 'public, max-age=3600',
+      },
+    })
+  }
 }
 
 // z.ai TTS（直接使用 fetch API）
@@ -211,11 +330,29 @@ export async function GET() {
         provider: 'z.ai'
       })),
     ],
+    features: {
+      audioEnhancement: 'should_enhance - 音頻增強，提高音質',
+      turboMode: 'should_use_turbo_model - 快速合成模式',
+      timestamps: 'should_return_timestamp - 返回 SRT 字幕和時間戳',
+      simplifiedToTraditional: '自動將簡體中文轉換為繁體',
+      formats: ['wav', 'mp3'],
+      languages: ['cantonese', 'english', 'mandarin'],
+    },
+    parameters: {
+      speed: { min: 0.5, max: 3.0, default: 1.0 },
+      pitch: { min: -12, max: 12, default: 0 },
+      duration: '可選目標時長（秒）',
+    },
     configStatus: {
       cantonese: CANTONESE_API_KEY ? 'configured' : 'not configured',
       zaiApi: ZAI_BASE_URL && ZAI_API_KEY ? 'configured' : 'not configured',
       zaiSdk: 'available (requires .z-ai-config)',
     },
-    maxLength: 1024,
+    maxLength: 5000,
+    usage: {
+      basic: 'POST /api/tts with { "text": "你的文字" }',
+      advanced: 'POST /api/tts with { "text": "...", "speed": 1.2, "pitch": 2, "enhance": true, "turbo": true }',
+      withTimestamps: 'POST /api/tts with { "text": "...", "timestamps": true } - 返回 JSON 含時間戳',
+    }
   })
 }
