@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import ZAI from 'z-ai-web-dev-sdk'
 
-// API 配置
+// API 配置 - 從環境變量讀取
 const BIGMODEL_API_KEY = process.env.BIGMODEL_API_KEY || ''
 const BIGMODEL_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4'
 const CANTONESE_API_KEY = process.env.CANTONESE_API_KEY || ''
@@ -228,7 +227,7 @@ ${description ? `內容：${description}` : ''}
   }
 }
 
-// 語音合成 - 支持 Cantonese.ai 和 z.ai SDK
+// 語音合成 - 支持 Cantonese.ai 和本地 TTS API
 async function synthesizeVoice(text: string, voice: string = 'tongtong'): Promise<string | null> {
   // 清理文本
   const cleanText = text.replace(/\n/g, '，').trim().slice(0, 500)
@@ -264,29 +263,41 @@ async function synthesizeVoice(text: string, voice: string = 'tongtong'): Promis
         }
       }
     } catch (error) {
-      console.error('❌ Cantonese.ai 失敗，嘗試 z.ai:', error)
+      console.error('❌ Cantonese.ai 失敗:', error)
     }
   }
 
-  // Fallback 使用 z.ai SDK
-  console.log('🎵 使用 z.ai SDK 進行語音合成...')
+  // 使用本地 TTS API (調用 /api/tts)
+  console.log('🎵 使用本地 TTS API 進行語音合成...')
 
   try {
-    const zai = await ZAI.create()
+    // 在服務器端，使用 localhost
+    const baseUrl = process.env.VERCEL_URL 
+      ? `https://${process.env.VERCEL_URL}` 
+      : 'http://localhost:3000'
 
-    const response = await zai.audio.tts.create({
-      input: cleanText,
-      voice: 'tongtong',
-      speed: 0.95,
-      response_format: 'wav',
-      stream: false
+    const response = await fetch(`${baseUrl}/api/tts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        text: cleanText,
+        voice: voice,
+        speed: 0.95,
+      }),
     })
 
+    if (!response.ok) {
+      throw new Error(`TTS API error: ${response.status}`)
+    }
+
+    // TTS API 直接返回音頻數據
     const arrayBuffer = await response.arrayBuffer()
     const buffer = Buffer.from(new Uint8Array(arrayBuffer))
     return buffer.toString('base64')
   } catch (error) {
-    console.error('❌ z.ai TTS 失敗:', error)
+    console.error('❌ 本地 TTS API 失敗:', error)
     return null
   }
 }
