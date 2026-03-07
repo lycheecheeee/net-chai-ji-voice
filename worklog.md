@@ -156,3 +156,26 @@ Stage Summary:
 - Vercel 部署: ✅ 成功
 - 自動化: ⏳ 需設置定時服務
 - 音頻質量: ✅ 粵語女聲，約 500-600KB/節目
+
+---
+Task ID: cantonese-api-features
+Agent: Super Z
+Task: 學習並集成 Cantonese.ai API 高級功能
+
+Work Log:
+- 學習 Cantonese.ai TTS API 文檔
+- 發現新功能：音頻增強、快速模式、時間戳、SRT字幕、MP3輸出
+- 更新 TTS API 支持 should_enhance、should_use_turbo_model
+- 更新 TTS API 支持 should_return_timestamp 返回時間戳
+- 更新 TTS API 支持 pitch 音調調整（-12 ~ +12）
+- 更新 TTS API 支持 duration 目標時長
+- 更新 TTS API 支持 mp3 格式輸出
+- 更新 Radio API 使用新功能
+- 增加最大文字長度從 1024 到 5000 字符
+- 推送代碼到 GitHub
+
+Stage Summary:
+- TTS API 新功能：enhance, turbo, timestamps, pitch, duration, mp3
+- Radio API 集成新功能
+- 文字限制提升至 5000 字符
+- Vercel 部署進行中
