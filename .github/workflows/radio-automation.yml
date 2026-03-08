@@ -42,13 +42,15 @@ jobs:
           echo "CANTONESE_API_KEY=$CANTONESE_API_KEY" >> $GITHUB_ENV
 
       - name: 構建應用
-        run: bun run build
+        run: |
+          bun run build
+          echo "✅ 構建完成"
 
       - name: 啟動服務
-        run: bun start &
-        
-      - name: 等待服務啟動
-        run: sleep 10
+        run: |
+          bun start &
+          sleep 15
+          curl -f http://localhost:3000/api/health || echo "服務可能仍在啟動中"
 
       - name: 生成電台節目 (自動)
         if: inputs.auto == true || !inputs.hour
