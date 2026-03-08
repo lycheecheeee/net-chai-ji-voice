@@ -1,24 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import ZAI from 'z-ai-web-dev-sdk'
 
 // API 配置
 const CANTONESE_API_KEY = process.env.CANTONESE_API_KEY || ''
 const CANTONESE_API_URL = 'https://cantonese.ai/api/tts'
-
-// z.ai API 配置 - 從環境變量讀取
-const ZAI_BASE_URL = process.env.ZAI_BASE_URL || ''
-const ZAI_API_KEY = process.env.ZAI_API_KEY || ''
-const ZAI_CHAT_ID = process.env.ZAI_CHAT_ID || ''
-const ZAI_TOKEN = process.env.ZAI_TOKEN || ''
-const ZAI_USER_ID = process.env.ZAI_USER_ID || ''
 
 // Cantonese.ai 語音 ID
 const CANTONESE_VOICE_IDS = {
   cantonese_female: '91b6d38b-d4e9-42ce-bf3c-9793741c0d18',
   cantonese_male: '91b6d38b-d4e9-42ce-bf3c-9793741c0d18',
 } as const
-
-const ZAI_VOICES = ['tongtong', 'chuichui', 'xiaochen', 'jam', 'kazi', 'douji', 'luodo'] as const
 
 // TTS 請求參數接口
 interface TTSRequest {
@@ -81,37 +71,19 @@ export async function POST(request: NextRequest) {
     const validSpeed = Math.max(0.5, Math.min(3.0, speed))
     const validPitch = Math.max(-12, Math.min(12, pitch))
 
-    // 優先使用 Cantonese.ai（如果有 API Key）
-    if (CANTONESE_API_KEY) {
-      try {
-        return await handleCantoneseTTS({
-          text,
-          voice,
-          speed: validSpeed,
-          pitch: validPitch,
-          format,
-          enhance,
-          turbo,
-          timestamps,
-          duration,
-          language
-        })
-      } catch (error) {
-        console.error('Cantonese.ai 失敗:', error)
-      }
-    }
-
-    // 嘗試 z.ai API（如果有環境變量配置）
-    if (ZAI_BASE_URL && ZAI_API_KEY) {
-      try {
-        return await handleZAIAPITTS(text, voice, validSpeed)
-      } catch (error) {
-        console.error('z.ai API 失敗:', error)
-      }
-    }
-
-    // 最後嘗試 z.ai SDK（本地開發環境）
-    return await handleZAISDKTTS(text, voice, validSpeed)
+    // 使用 Cantonese.ai TTS
+    return await handleCantoneseTTS({
+      text,
+      voice,
+      speed: validSpeed,
+      pitch: validPitch,
+      format,
+      enhance,
+      turbo,
+      timestamps,
+      duration,
+      language
+    })
 
   } catch (error) {
     console.error('TTS Error:', error)
@@ -154,6 +126,13 @@ async function handleCantoneseTTS(params: {
     turbo,
     timestamps
   })
+
+  if (!CANTONESE_API_KEY) {
+    return NextResponse.json(
+      { error: 'Cantonese.ai API 密鑰未配置，請設置 CANTONESE_API_KEY 環境變量' },
+      { status: 500 }
+    )
+  }
 
   const voiceId = CANTONESE_VOICE_IDS[voice as keyof typeof CANTONESE_VOICE_IDS]
     || CANTONESE_VOICE_IDS.cantonese_female
@@ -204,6 +183,12 @@ async function handleCantoneseTTS(params: {
         { status: 429 }
       )
     }
+    if (response.status === 401) {
+      return NextResponse.json(
+        { error: 'Cantonese.ai API 密鑰無效，請檢查 CANTONESE_API_KEY' },
+        { status: 401 }
+      )
+    }
 
     throw new Error(`Cantonese.ai API error: ${response.status}`)
   }
@@ -214,7 +199,6 @@ async function handleCantoneseTTS(params: {
     const result: TTSResponseWithTimestamps = await response.json()
 
     console.log(`✅ Cantonese.ai 成功 (帶時間戳): ${result.file.length} bytes`)
-    console.log(`📝 SRT 字幕: ${result.srt_timestamp.slice(0, 100)}...`)
 
     return NextResponse.json({
       success: true,
@@ -245,90 +229,13 @@ async function handleCantoneseTTS(params: {
   }
 }
 
-// z.ai TTS（直接使用 fetch API）
-async function handleZAIAPITTS(text: string, voice: string, speed: number) {
-  console.log('🎵 使用 z.ai API TTS:', text.slice(0, 50))
-
-  const validVoice = ZAI_VOICES.includes(voice as any) ? voice : 'tongtong'
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${ZAI_API_KEY}`,
-  }
-
-  if (ZAI_CHAT_ID) headers['X-Chat-Id'] = ZAI_CHAT_ID
-  if (ZAI_TOKEN) headers['X-Token'] = ZAI_TOKEN
-  if (ZAI_USER_ID) headers['X-User-Id'] = ZAI_USER_ID
-
-  const response = await fetch(`${ZAI_BASE_URL}/audio/tts`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      input: text,
-      voice: validVoice,
-      speed: speed,
-      response_format: 'wav',
-      stream: false
-    }),
-  })
-
-  if (!response.ok) {
-    throw new Error(`z.ai API error: ${response.status}`)
-  }
-
-  const arrayBuffer = await response.arrayBuffer()
-  const buffer = Buffer.from(new Uint8Array(arrayBuffer))
-
-  return new NextResponse(buffer, {
-    status: 200,
-    headers: {
-      'Content-Type': 'audio/wav',
-      'Content-Length': buffer.length.toString(),
-      'Cache-Control': 'no-cache',
-    },
-  })
-}
-
-// z.ai SDK TTS（本地開發環境）
-async function handleZAISDKTTS(text: string, voice: string, speed: number) {
-  console.log('🎵 使用 z.ai SDK TTS:', text.slice(0, 50))
-
-  const validVoice = ZAI_VOICES.includes(voice as any) ? voice : 'tongtong'
-
-  const zai = await ZAI.create()
-
-  const response = await zai.audio.tts.create({
-    input: text,
-    voice: validVoice as any,
-    speed: speed,
-    response_format: 'wav',
-    stream: false
-  })
-
-  const arrayBuffer = await response.arrayBuffer()
-  const buffer = Buffer.from(new Uint8Array(arrayBuffer))
-
-  return new NextResponse(buffer, {
-    status: 200,
-    headers: {
-      'Content-Type': 'audio/wav',
-      'Content-Length': buffer.length.toString(),
-      'Cache-Control': 'no-cache',
-    },
-  })
-}
-
 // GET 端點
 export async function GET() {
   return NextResponse.json({
+    provider: 'Cantonese.ai',
     voices: [
-      { id: 'cantonese_female', name: '粵語女聲', provider: 'Cantonese.ai', voice_id: CANTONESE_VOICE_IDS.cantonese_female },
-      { id: 'cantonese_male', name: '粵語男聲', provider: 'Cantonese.ai', voice_id: CANTONESE_VOICE_IDS.cantonese_male },
-      ...ZAI_VOICES.map(v => ({
-        id: v,
-        name: v,
-        provider: 'z.ai'
-      })),
+      { id: 'cantonese_female', name: '粵語女聲', voice_id: CANTONESE_VOICE_IDS.cantonese_female },
+      { id: 'cantonese_male', name: '粵語男聲', voice_id: CANTONESE_VOICE_IDS.cantonese_male },
     ],
     features: {
       audioEnhancement: 'should_enhance - 音頻增強，提高音質',
@@ -345,8 +252,6 @@ export async function GET() {
     },
     configStatus: {
       cantonese: CANTONESE_API_KEY ? 'configured' : 'not configured',
-      zaiApi: ZAI_BASE_URL && ZAI_API_KEY ? 'configured' : 'not configured',
-      zaiSdk: 'available (requires .z-ai-config)',
     },
     maxLength: 5000,
     usage: {
